@@ -1,4 +1,4 @@
-import { Plugin, TFile } from 'obsidian';
+import { Plugin, TFile, Notice, App, PluginSettingTab, Setting } from 'obsidian';
 
 interface GraphNode {
     id: string;
@@ -15,8 +15,47 @@ interface GraphData {
     edges: GraphEdge[];
 }
 
+interface GraphToJsonSettings {
+    targetDirectory: string;
+}
+
+const DEFAULT_SETTINGS: GraphToJsonSettings = {
+    targetDirectory: ''
+}
+
+class GraphToJsonSettingTab extends PluginSettingTab {
+    plugin: GraphToJsonPlugin;
+
+    constructor(app: App, plugin: GraphToJsonPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const {containerEl} = this;
+        containerEl.empty();
+
+        containerEl.createEl('h2', {text: 'Graph to JSON Settings'});
+
+        new Setting(containerEl)
+            .setName('Target Directory')
+            .setDesc('The directory to process cards from (relative to vault root)')
+            .addText(text => text
+                .setPlaceholder('Enter directory name')
+                .setValue(this.plugin.settings.targetDirectory)
+                .onChange(async (value) => {
+                    this.plugin.settings.targetDirectory = value;
+                    await this.plugin.saveData(this.plugin.settings);
+                }));
+    }
+}
+
 export default class GraphToJsonPlugin extends Plugin {
+    settings: GraphToJsonSettings;
+
     async onload() {
+        await this.loadSettings();
+
         // Add a ribbon icon
         this.addRibbonIcon('graph', 'Export Graph to JSON', () => {
             this.exportGraphToJson();
@@ -30,6 +69,17 @@ export default class GraphToJsonPlugin extends Plugin {
                 this.exportGraphToJson();
             }
         });
+
+        // Add settings tab
+        this.addSettingTab(new GraphToJsonSettingTab(this.app, this));
+    }
+
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
     }
 
     async exportGraphToJson() {
@@ -38,7 +88,7 @@ export default class GraphToJsonPlugin extends Plugin {
         console.log('Active leaf:', activeLeaf);
         
         if (!activeLeaf) {
-            console.error('No active leaf found');
+            new Notice('No active view found');
             return;
         }
 
@@ -46,22 +96,30 @@ export default class GraphToJsonPlugin extends Plugin {
         console.log('View state:', viewState);
         
         if (viewState.type !== 'graph') {
-            console.error('No graph view is active. Please open the Graph view first (View -> Graph).');
-            console.error('Current view type:', viewState.type);
+            new Notice('Please open the Graph view first');
             return;
         }
 
-        // Get all markdown files from CardsPublic folder
+        // Get all markdown files from target directory
         const allFiles = app.vault.getMarkdownFiles();
-        const files = allFiles.filter(file => file.path.startsWith('CardsPublic/'));
-        console.log('Processing files from CardsPublic folder:', files.length);
+        const targetDir = this.settings.targetDirectory;
+        const files = targetDir ? 
+            allFiles.filter(file => file.path.startsWith(targetDir + '/')) :
+            allFiles;
+        console.log(`Processing files from ${targetDir || 'root'} folder:`, files.length);
         
+        if (files.length === 0) {
+            new Notice(`No files found in ${targetDir || 'root'} folder`);
+            return;
+        }
+
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
 
         // Create nodes
         for (const file of files) {
-            const relativePath = app.vault.getResourcePath(file);
+            // Get path relative to target directory
+            const relativePath = targetDir ? file.path.replace(targetDir + '/', '') : file.path;
             const directory = relativePath.split('/').slice(0, -1).join('/');
             const id = file.basename;
 
@@ -80,7 +138,8 @@ export default class GraphToJsonPlugin extends Plugin {
                 const targetPath = link.slice(2, -2);
                 const targetFile = app.metadataCache.getFirstLinkpathDest(targetPath, file.path);
 
-                if (targetFile && targetFile.extension === 'md' && targetFile.path.startsWith('CardsPublic/')) {
+                if (targetFile && targetFile.extension === 'md' && 
+                    (!targetDir || targetFile.path.startsWith(targetDir + '/'))) {
                     edges.push({
                         from: file.basename,
                         to: targetFile.basename
@@ -106,8 +165,9 @@ export default class GraphToJsonPlugin extends Plugin {
             } else {
                 await app.vault.create(jsonPath, jsonContent);
             }
-            console.log('Graph data exported successfully to graph.json');
+            new Notice('Graph data exported successfully to graph_data.json');
         } catch (error) {
+            new Notice('Error exporting graph data: ' + error.message);
             console.error('Error exporting graph data:', error);
         }
     }
