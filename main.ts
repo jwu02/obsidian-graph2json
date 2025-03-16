@@ -6,8 +6,8 @@ interface GraphNode {
 }
 
 interface GraphEdge {
-    from: string;
-    to: string;
+    source: string;
+    target: string;
 }
 
 interface GraphData {
@@ -141,8 +141,8 @@ export default class GraphToJsonPlugin extends Plugin {
                 if (targetFile && targetFile.extension === 'md' && 
                     (!targetDir || targetFile.path.startsWith(targetDir + '/'))) {
                     edges.push({
-                        from: file.basename,
-                        to: targetFile.basename
+                        source: file.basename,
+                        target: targetFile.basename
                     });
                 }
             }
